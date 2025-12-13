@@ -1,9 +1,0 @@
-/home/joseppi/Projects/FEARTrackerPi/build/CMakeFiles/feartracker_lib.dir
-/home/joseppi/Projects/FEARTrackerPi/build/CMakeFiles/feartracker_pi.dir
-/home/joseppi/Projects/FEARTrackerPi/build/CMakeFiles/feartracker_benchmark.dir
-/home/joseppi/Projects/FEARTrackerPi/build/CMakeFiles/edit_cache.dir
-/home/joseppi/Projects/FEARTrackerPi/build/CMakeFiles/rebuild_cache.dir
-/home/joseppi/Projects/FEARTrackerPi/build/CMakeFiles/list_install_components.dir
-/home/joseppi/Projects/FEARTrackerPi/build/CMakeFiles/install.dir
-/home/joseppi/Projects/FEARTrackerPi/build/CMakeFiles/install/local.dir
-/home/joseppi/Projects/FEARTrackerPi/build/CMakeFiles/install/strip.dir

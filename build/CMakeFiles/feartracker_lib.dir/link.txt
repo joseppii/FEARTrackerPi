@@ -1,2 +1,0 @@
-/usr/bin/ar qc libfeartracker_lib.a CMakeFiles/feartracker_lib.dir/src/fear_tracker.cpp.o CMakeFiles/feartracker_lib.dir/src/onnx_inference.cpp.o CMakeFiles/feartracker_lib.dir/src/image_processor.cpp.o CMakeFiles/feartracker_lib.dir/src/tracking_state.cpp.o CMakeFiles/feartracker_lib.dir/src/performance_monitor.cpp.o CMakeFiles/feartracker_lib.dir/src/utils.cpp.o
-/usr/bin/ranlib libfeartracker_lib.a

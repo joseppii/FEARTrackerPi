@@ -69,7 +69,26 @@ private:
 
     // Cached template features shape (set after template extraction)
     std::vector<int64_t> template_features_shape_;
-    
+
+    // Pre-allocated buffers for speed (avoid repeated allocations)
+    std::vector<float> template_input_buffer_;
+    std::vector<float> search_input_buffer_;
+    cv::Mat preprocess_buffer_;
+    std::vector<cv::Mat> channel_buffers_;
+    bool buffers_initialized_ = false;
+
+    // Cached name pointers (avoid rebuilding every call)
+    std::vector<const char*> template_input_names_ptrs_;
+    std::vector<const char*> template_output_names_ptrs_;
+    std::vector<const char*> search_input_names_ptrs_;
+    std::vector<const char*> search_output_names_ptrs_;
+
+    // Pre-allocated run options
+    Ort::RunOptions run_options_;
+
+    void initialize_buffers();
+    void cache_name_pointers();
+
     // Helper methods
     bool setup_providers();
     bool create_session_options();
@@ -79,6 +98,8 @@ private:
     // Image preprocessing
     cv::Mat preprocess_for_inference(const cv::Mat& image, cv::Size target_size);
     std::vector<float> mat_to_tensor(const cv::Mat& mat, bool normalize = true);
+    void mat_to_tensor_fast(const cv::Mat& mat, std::vector<float>& out_buffer, bool normalize = true);
+    void image_to_tensor_direct(const cv::Mat& image, std::vector<float>& out_buffer, int target_size);
     
     // Tensor utilities
     Ort::Value create_tensor(const std::vector<float>& data, 
