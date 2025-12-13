@@ -5,6 +5,7 @@
 #include <fstream>
 #include <algorithm>
 #include <cstdlib>
+#include <cstring>
 #include <unistd.h>
 #include <sys/sysinfo.h>
 

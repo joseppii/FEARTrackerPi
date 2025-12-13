@@ -2,6 +2,7 @@
 #include "utils.h"
 #include "build_info.h"
 #include <iostream>
+#include <numeric>
 #include <opencv2/opencv.hpp>
 #include <chrono>
 #include <fstream>

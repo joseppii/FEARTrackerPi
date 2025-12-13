@@ -66,6 +66,9 @@ private:
     int intra_op_threads_;
     int inter_op_threads_;
     std::vector<std::string> preferred_providers_;
+
+    // Cached template features shape (set after template extraction)
+    std::vector<int64_t> template_features_shape_;
     
     // Helper methods
     bool setup_providers();

@@ -117,7 +117,10 @@ std::vector<float> ONNXInference::extract_template_features(const cv::Mat& templ
             std::cerr << "No output from template model" << std::endl;
             return {};
         }
-        
+
+        // Cache the output shape for use in search model
+        template_features_shape_ = output_tensors[0].GetTensorTypeAndShapeInfo().GetShape();
+
         // Extract features from first output tensor
         return tensor_to_vector(output_tensors[0]);
         
@@ -149,24 +152,14 @@ InferenceResult ONNXInference::process_search_region(const std::vector<float>& t
         // Create input tensors
         std::vector<int64_t> search_shape = {1, 3, 256, 256};
         Ort::Value search_tensor_ort = create_tensor(search_tensor, search_shape);
-        
-        // Template features shape (depends on model architecture)
-        std::vector<int64_t> template_shape = {1, static_cast<int64_t>(template_features.size())};
-        
-        // Find correct shape from model info if available
-        for (const auto& shape : search_model_info_.input_shapes) {
-            if (shape.size() >= 2) {
-                size_t feature_size = 1;
-                for (size_t i = 1; i < shape.size(); ++i) {
-                    feature_size *= shape[i];
-                }
-                if (feature_size == template_features.size()) {
-                    template_shape = shape;
-                    break;
-                }
-            }
+
+        // Use cached template features shape from template model extraction
+        std::vector<int64_t> template_shape = template_features_shape_;
+        if (template_shape.empty()) {
+            std::cerr << "Template features shape not available - run extract_template_features first" << std::endl;
+            return result;
         }
-        
+
         Ort::Value template_tensor_ort = create_tensor(template_features, template_shape);
         
         // Prepare inputs
@@ -224,14 +217,9 @@ std::vector<std::string> ONNXInference::get_available_providers() const {
 }
 
 std::vector<std::string> ONNXInference::get_active_providers() const {
-    std::vector<std::string> active;
-    if (template_session_) {
-        auto providers_info = template_session_->GetProviders();
-        for (const auto& provider : providers_info) {
-            active.push_back(provider);
-        }
-    }
-    return active;
+    // Return the configured preferred providers
+    // (ONNX Runtime C++ API doesn't expose GetProviders on Session)
+    return preferred_providers_;
 }
 
 void ONNXInference::set_intra_op_threads(int num_threads) {
@@ -280,19 +268,9 @@ bool ONNXInference::create_session_options() {
         // Setup providers
         setup_providers();
         
-        // Add execution providers
-        for (const auto& provider : preferred_providers_) {
-            if (provider == "OpenCLExecutionProvider") {
-                try {
-                    OrtOpenCLProviderOptions opencl_options{};
-                    opencl_options.device_type = 1;  // GPU
-                    opencl_options.enable_opencl_throttling = 1;
-                    session_options_->AppendExecutionProvider_OpenCL(opencl_options);
-                } catch (...) {
-                    std::cout << "OpenCL provider setup failed, continuing with CPU" << std::endl;
-                }
-            }
-        }
+        // Note: OpenCL provider is not available in standard ONNX Runtime for ARM
+        // The CPUExecutionProvider will be used automatically as fallback
+        // GPU acceleration would require a custom ONNX Runtime build with OpenCL support
         
         return true;
         
@@ -393,7 +371,7 @@ std::vector<float> ONNXInference::mat_to_tensor(const cv::Mat& mat, bool normali
             tensor_data.assign(data, data + mat.total());
         } else {
             for (int y = 0; y < mat.rows; y++) {
-                float* row_data = mat.ptr<float>(y);
+                const float* row_data = mat.ptr<float>(y);
                 tensor_data.insert(tensor_data.end(), row_data, row_data + mat.cols);
             }
         }

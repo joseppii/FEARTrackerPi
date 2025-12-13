@@ -1,6 +1,7 @@
 #include "utils.h"
 #include <iostream>
 #include <sstream>
+#include <fstream>
 #include <algorithm>
 #include <sys/stat.h>
 #include <sys/utsname.h>
@@ -264,17 +265,17 @@ bool parse_args(int argc, char* argv[], std::map<std::string, std::string>& args
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
         
-        if (arg.startswith("--")) {
+        if (arg.rfind("--", 0) == 0) {
             std::string key = arg.substr(2);
             std::string value = "";
-            
+
             // Check if there's a value
             if (i + 1 < argc && argv[i + 1][0] != '-') {
                 value = argv[++i];
             }
-            
+
             args[key] = value;
-        } else if (arg.startswith("-")) {
+        } else if (arg.rfind("-", 0) == 0) {
             std::string key = arg.substr(1);
             std::string value = "";
             

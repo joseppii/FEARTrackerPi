@@ -15,8 +15,8 @@ ImageProcessor::ImageProcessor()
 
 ImageProcessor::~ImageProcessor() = default;
 
-bool ImageProcessor::extract_template_crop(const cv::Mat& frame, 
-                                          const cv::Rect& bbox, 
+bool ImageProcessor::extract_template_crop(const cv::Mat& frame,
+                                          const cv::Rect& bbox,
                                           int template_size,
                                           float template_offset,
                                           cv::Mat& template_crop,
@@ -24,31 +24,27 @@ bool ImageProcessor::extract_template_crop(const cv::Mat& frame,
     if (frame.empty() || template_size <= 0) {
         return false;
     }
-    
-    // Calculate template region with offset
-    cv::Point2f center = get_bbox_center(bbox);
-    float max_side = std::max(bbox.width, bbox.height);
-    float template_side = max_side * template_offset;
-    
-    // Calculate template bounding box
-    template_bbox = cv::Rect(
-        static_cast<int>(center.x - template_side / 2),
-        static_cast<int>(center.y - template_side / 2),
-        static_cast<int>(template_side),
-        static_cast<int>(template_side)
-    );
-    
+
+    // Match Python extend_bbox: extends by offset fraction on each side
+    // extended = [x - w*offset, y - h*offset, w*(1+2*offset), h*(1+2*offset)]
+    int ext_x = static_cast<int>(bbox.x - bbox.width * template_offset);
+    int ext_y = static_cast<int>(bbox.y - bbox.height * template_offset);
+    int ext_w = static_cast<int>(bbox.width * (1.0f + 2.0f * template_offset));
+    int ext_h = static_cast<int>(bbox.height * (1.0f + 2.0f * template_offset));
+
+    template_bbox = cv::Rect(ext_x, ext_y, ext_w, ext_h);
+
     // Handle padding if crop extends beyond frame
     cv::Scalar mean_color = cv::mean(frame);
     template_crop = apply_padding(frame, template_bbox, frame.size(), mean_color);
-    
+
     if (template_crop.empty()) {
         return false;
     }
-    
+
     // Resize to target template size
     cv::resize(template_crop, template_crop, cv::Size(template_size, template_size));
-    
+
     return true;
 }
 
@@ -63,31 +59,27 @@ bool ImageProcessor::extract_search_crop(const cv::Mat& frame,
     if (frame.empty() || instance_size <= 0) {
         return false;
     }
-    
-    // Calculate search region
-    cv::Point2f center = get_bbox_center(bbox);
-    float max_side = std::max(bbox.width, bbox.height);
-    float search_side = max_side * search_context;
-    
-    search_region = cv::Rect(
-        static_cast<int>(center.x - search_side / 2),
-        static_cast<int>(center.y - search_side / 2),
-        static_cast<int>(search_side),
-        static_cast<int>(search_side)
-    );
-    
-    search_center = center;
-    
+
+    // Match Python extend_bbox: extends by offset fraction on each side
+    // For search_context=2: extended = [x - 2w, y - 2h, 5w, 5h]
+    int ext_x = static_cast<int>(bbox.x - bbox.width * search_context);
+    int ext_y = static_cast<int>(bbox.y - bbox.height * search_context);
+    int ext_w = static_cast<int>(bbox.width * (1.0f + 2.0f * search_context));
+    int ext_h = static_cast<int>(bbox.height * (1.0f + 2.0f * search_context));
+
+    search_region = cv::Rect(ext_x, ext_y, ext_w, ext_h);
+    search_center = get_bbox_center(bbox);
+
     // Extract search crop with padding
     search_crop = apply_padding(frame, search_region, frame.size(), padding_value);
-    
+
     if (search_crop.empty()) {
         return false;
     }
-    
+
     // Resize to target instance size
     cv::resize(search_crop, search_crop, cv::Size(instance_size, instance_size));
-    
+
     return true;
 }
 
@@ -179,14 +171,21 @@ void ImageProcessor::initialize_grids() const {
     grid_y_.clear();
     grid_x_.reserve(score_size_ * score_size_);
     grid_y_.reserve(score_size_ * score_size_);
-    
+
+    // Match Python: grid = (idx - score_size//2) * total_stride + instance_size//2
+    // For score_size=16, total_stride=16, instance_size=256:
+    // idx 0: (0-8)*16 + 128 = 0
+    // idx 15: (15-8)*16 + 128 = 240
+    const int instance_size = 256;
+    const int half_score = score_size_ / 2;
+
     for (int y = 0; y < score_size_; ++y) {
         for (int x = 0; x < score_size_; ++x) {
-            grid_x_.push_back((x * total_stride_) + total_stride_ / 2.0f);
-            grid_y_.push_back((y * total_stride_) + total_stride_ / 2.0f);
+            grid_x_.push_back((x - half_score) * total_stride_ + instance_size / 2.0f);
+            grid_y_.push_back((y - half_score) * total_stride_ + instance_size / 2.0f);
         }
     }
-    
+
     grids_initialized_ = true;
 }
 

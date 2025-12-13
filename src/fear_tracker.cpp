@@ -15,7 +15,7 @@ FEARTracker::FEARTracker()
     , template_size_(128)
     , instance_size_(256)
     , search_context_(2.0f)
-    , template_offset_(2.0f)
+    , template_offset_(0.2f)
     , initialized_(false)
     , tracking_(false)
     , monitoring_enabled_(false)
@@ -280,5 +280,5 @@ void FEARTracker::set_default_configuration() {
     template_size_ = 128;
     instance_size_ = 256;
     search_context_ = 2.0f;
-    template_offset_ = 2.0f;
+    template_offset_ = 0.2f;
 }
