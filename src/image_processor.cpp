@@ -1,5 +1,5 @@
 #include "image_processor.h"
-#include "onnx_inference.h"
+#include "inference_types.h"
 #include <iostream>
 #include <algorithm>
 #include <cmath>

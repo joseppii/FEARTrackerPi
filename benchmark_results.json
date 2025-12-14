@@ -1,22 +1,22 @@
 {
-  "timestamp": "2025-12-14 02:24:00",
+  "timestamp": "2025-12-14 03:35:20",
   "version": "1.0.0",
   "build_type": "Release",
   "system_info": "",
   "performance": {
-    "total_frames": 100,
-    "total_time_sec": 11.7008,
-    "initialization_time_ms": 131.082,
-    "avg_fps": 9.35752,
-    "min_fps": 4.04798,
-    "max_fps": 14.796,
-    "avg_inference_time_ms": 106.866,
-    "avg_confidence": 0.979797,
-    "min_confidence": 0.978328,
-    "max_confidence": 0.979975
+    "total_frames": 300,
+    "total_time_sec": 37.5132,
+    "initialization_time_ms": 211.426,
+    "avg_fps": 10.0525,
+    "min_fps": 3.43808,
+    "max_fps": 67.6303,
+    "avg_inference_time_ms": 99.4775,
+    "avg_confidence": 0.873691,
+    "min_confidence": 0.366286,
+    "max_confidence": 0.979786
   },
   "thermal": {
-    "avg_temperature_c": 57.19,
-    "max_temperature_c": 58.4
+    "avg_temperature_c": 53.6333,
+    "max_temperature_c": 55.65
   }
 }

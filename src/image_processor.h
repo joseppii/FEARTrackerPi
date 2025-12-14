@@ -2,8 +2,7 @@
 
 #include <opencv2/opencv.hpp>
 #include <vector>
-
-struct InferenceResult; // Forward declaration
+#include "inference_types.h"
 
 class ImageProcessor {
 public:

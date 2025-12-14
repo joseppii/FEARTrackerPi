@@ -1,0 +1,26 @@
+# Build artifacts
+build/
+cmake-build-*/
+
+# Assets (large files)
+assets/
+
+# Output files
+outputs/
+*.mp4
+benchmark_results.json
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*~
+
+# Compiled
+*.o
+*.a
+*.so
+
+# NCNN converted models (regeneratable)
+*.param
+*.bin

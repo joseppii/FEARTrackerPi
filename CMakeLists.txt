@@ -4,6 +4,10 @@ project(FEARTrackerPi VERSION 1.0.0)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Inference backend option
+option(USE_NCNN "Use NCNN backend (with Vulkan GPU support)" ON)
+option(USE_ONNX "Use ONNX Runtime backend" OFF)
+
 # Optimize for Pi5 Cortex-A76
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=armv8.2-a+fp16+simd -mtune=cortex-a76")
 set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3 -DNDEBUG -ffast-math")
@@ -29,44 +33,101 @@ else()
     message(FATAL_ERROR "OpenCV not found")
 endif()
 
-# ONNX Runtime (required)
-find_path(ONNXRUNTIME_INCLUDE_DIR 
-    NAMES onnxruntime_cxx_api.h
-    PATHS 
-        /usr/include/onnxruntime
-        /usr/local/include/onnxruntime
-        /opt/onnxruntime/include
-)
+# Inference backend selection
+if(USE_NCNN)
+    message(STATUS "Using NCNN backend with Vulkan GPU support")
 
-find_library(ONNXRUNTIME_LIB 
-    NAMES onnxruntime
-    PATHS 
-        /usr/lib/aarch64-linux-gnu
-        /usr/local/lib
-        /opt/onnxruntime/lib
-)
+    # Find NCNN
+    find_package(ncnn QUIET)
+    if(NOT ncnn_FOUND)
+        # Try to find NCNN manually
+        find_path(NCNN_INCLUDE_DIR
+            NAMES ncnn/net.h
+            PATHS
+                /usr/include
+                /usr/local/include
+                /tmp/ncnn/build/install/include
+        )
+        find_library(NCNN_LIB
+            NAMES ncnn
+            PATHS
+                /usr/lib
+                /usr/local/lib
+                /tmp/ncnn/build/install/lib
+        )
+        if(NCNN_INCLUDE_DIR AND NCNN_LIB)
+            message(STATUS "NCNN found: ${NCNN_LIB}")
+            set(NCNN_LIBRARIES ${NCNN_LIB})
+            set(NCNN_INCLUDE_DIRS ${NCNN_INCLUDE_DIR})
+        else()
+            message(FATAL_ERROR "NCNN not found. Build with: cd /tmp/ncnn/build && sudo make install")
+        endif()
+    else()
+        message(STATUS "NCNN found via CMake package")
+        set(NCNN_LIBRARIES ncnn)
+    endif()
 
-if(NOT ONNXRUNTIME_INCLUDE_DIR OR NOT ONNXRUNTIME_LIB)
-    message(FATAL_ERROR "ONNX Runtime not found. Please install ONNX Runtime for ARM64")
+    # Find Vulkan
+    find_package(Vulkan REQUIRED)
+    message(STATUS "Vulkan found: ${Vulkan_LIBRARIES}")
+
+    add_definitions(-DUSE_NCNN=1)
+
+elseif(USE_ONNX)
+    message(STATUS "Using ONNX Runtime backend")
+
+    # ONNX Runtime
+    find_path(ONNXRUNTIME_INCLUDE_DIR
+        NAMES onnxruntime_cxx_api.h
+        PATHS
+            /usr/include/onnxruntime
+            /usr/local/include/onnxruntime
+            /opt/onnxruntime/include
+    )
+    find_library(ONNXRUNTIME_LIB
+        NAMES onnxruntime
+        PATHS
+            /usr/lib/aarch64-linux-gnu
+            /usr/local/lib
+            /opt/onnxruntime/lib
+    )
+    if(NOT ONNXRUNTIME_INCLUDE_DIR OR NOT ONNXRUNTIME_LIB)
+        message(FATAL_ERROR "ONNX Runtime not found. Please install ONNX Runtime for ARM64")
+    endif()
+    message(STATUS "ONNX Runtime include: ${ONNXRUNTIME_INCLUDE_DIR}")
+    message(STATUS "ONNX Runtime library: ${ONNXRUNTIME_LIB}")
+
+    add_definitions(-DUSE_ONNX=1)
+
+else()
+    message(FATAL_ERROR "No inference backend selected. Set USE_NCNN=ON or USE_ONNX=ON")
 endif()
-
-message(STATUS "ONNX Runtime include: ${ONNXRUNTIME_INCLUDE_DIR}")
-message(STATUS "ONNX Runtime library: ${ONNXRUNTIME_LIB}")
 
 # Include directories
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/src)
 include_directories(${OpenCV_INCLUDE_DIRS})
-include_directories(${ONNXRUNTIME_INCLUDE_DIR})
 
-# Source files
+if(USE_NCNN)
+    include_directories(${NCNN_INCLUDE_DIRS})
+elseif(USE_ONNX)
+    include_directories(${ONNXRUNTIME_INCLUDE_DIR})
+endif()
+
+# Source files (common)
 set(FEAR_TRACKER_SOURCES
     src/fear_tracker.cpp
-    src/onnx_inference.cpp
     src/image_processor.cpp
     src/tracking_state.cpp
     src/performance_monitor.cpp
     src/utils.cpp
 )
+
+# Add backend-specific inference source
+if(USE_NCNN)
+    list(APPEND FEAR_TRACKER_SOURCES src/ncnn_inference.cpp)
+elseif(USE_ONNX)
+    list(APPEND FEAR_TRACKER_SOURCES src/onnx_inference.cpp)
+endif()
 
 set(MAIN_SOURCES
     src/main.cpp
@@ -76,11 +137,33 @@ set(MAIN_SOURCES
 add_library(feartracker_lib STATIC ${FEAR_TRACKER_SOURCES})
 
 # Link libraries to feartracker_lib
-target_link_libraries(feartracker_lib 
-    ${OpenCV_LIBS} 
-    ${ONNXRUNTIME_LIB}
-    pthread
-)
+if(USE_NCNN)
+    find_package(OpenMP REQUIRED)
+
+    # glslang libraries (built with NCNN for Vulkan shader compilation)
+    set(GLSLANG_LIBS
+        /tmp/ncnn/build/install/lib/libglslang.a
+        /tmp/ncnn/build/install/lib/libMachineIndependent.a
+        /tmp/ncnn/build/install/lib/libGenericCodeGen.a
+        /tmp/ncnn/build/install/lib/libOSDependent.a
+        /tmp/ncnn/build/install/lib/libSPIRV.a
+    )
+
+    target_link_libraries(feartracker_lib
+        ${OpenCV_LIBS}
+        ${NCNN_LIBRARIES}
+        ${GLSLANG_LIBS}
+        ${Vulkan_LIBRARIES}
+        OpenMP::OpenMP_CXX
+        pthread
+    )
+elseif(USE_ONNX)
+    target_link_libraries(feartracker_lib
+        ${OpenCV_LIBS}
+        ${ONNXRUNTIME_LIB}
+        pthread
+    )
+endif()
 
 # Create main executable
 add_executable(feartracker_pi ${MAIN_SOURCES})

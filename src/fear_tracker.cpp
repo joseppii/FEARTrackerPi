@@ -1,5 +1,9 @@
 #include "fear_tracker.h"
+#if defined(USE_NCNN)
+#include "ncnn_inference.h"
+#else
 #include "onnx_inference.h"
+#endif
 #include "image_processor.h"
 #include "tracking_state.h"
 #include "performance_monitor.h"
@@ -7,8 +11,8 @@
 #include <iostream>
 #include <algorithm>
 
-FEARTracker::FEARTracker() 
-    : inference_engine_(std::make_unique<ONNXInference>())
+FEARTracker::FEARTracker()
+    : inference_engine_(std::make_unique<InferenceEngine>())
     , preprocessor_(std::make_unique<ImageProcessor>())
     , state_(std::make_unique<TrackingState>())
     , monitor_(std::make_unique<PerformanceMonitor>())
@@ -31,22 +35,59 @@ bool FEARTracker::initialize(const std::string& template_model_path,
         std::cerr << "Invalid configuration" << std::endl;
         return false;
     }
-    
-    // Load ONNX models
+
+#if defined(USE_NCNN)
+    // NCNN: paths are .param files, .bin files have same basename
+    std::string template_bin = template_model_path;
+    std::string search_bin = search_model_path;
+
+    // Replace .param with .bin if needed
+    auto replace_ext = [](std::string path, const std::string& new_ext) {
+        size_t dot = path.rfind('.');
+        if (dot != std::string::npos) {
+            path = path.substr(0, dot);
+        }
+        return path + new_ext;
+    };
+
+    template_bin = replace_ext(template_model_path, ".bin");
+    search_bin = replace_ext(search_model_path, ".bin");
+
+    std::string template_param = replace_ext(template_model_path, ".param");
+    std::string search_param = replace_ext(search_model_path, ".param");
+
+    if (!inference_engine_->load_template_model(template_param, template_bin)) {
+        std::cerr << "Failed to load template model: " << template_param << std::endl;
+        return false;
+    }
+
+    if (!inference_engine_->load_search_model(search_param, search_bin)) {
+        std::cerr << "Failed to load search model: " << search_param << std::endl;
+        return false;
+    }
+
+    // Print GPU info
+    std::cout << "NCNN backend: " << (inference_engine_->has_gpu() ? "GPU" : "CPU") << std::endl;
+    if (inference_engine_->has_gpu()) {
+        std::cout << "  GPU: " << inference_engine_->get_gpu_name() << std::endl;
+    }
+
+#else
+    // ONNX Runtime
     if (!inference_engine_->load_template_model(template_model_path)) {
         std::cerr << "Failed to load template model: " << template_model_path << std::endl;
         return false;
     }
-    
+
     if (!inference_engine_->load_search_model(search_model_path)) {
         std::cerr << "Failed to load search model: " << search_model_path << std::endl;
         return false;
     }
-    
+
     // Configure ONNX Runtime for Pi5 optimization
     inference_engine_->set_intra_op_threads(4);  // Use all 4 Cortex-A76 cores
     inference_engine_->set_inter_op_threads(1);
-    
+
     // Print provider information
     auto providers = inference_engine_->get_active_providers();
     std::cout << "Active ONNX providers: ";
@@ -54,7 +95,8 @@ bool FEARTracker::initialize(const std::string& template_model_path,
         std::cout << provider << " ";
     }
     std::cout << std::endl;
-    
+#endif
+
     initialized_ = true;
     return true;
 }

@@ -5,8 +5,15 @@
 #include <vector>
 #include <opencv2/opencv.hpp>
 
-// Forward declarations
+// Forward declarations for inference backends
+#if defined(USE_NCNN)
+class NCNNInference;
+using InferenceEngine = NCNNInference;
+#else
 class ONNXInference;
+using InferenceEngine = ONNXInference;
+#endif
+
 class ImageProcessor;
 class TrackingState;
 class PerformanceMonitor;
@@ -53,7 +60,7 @@ public:
 
 private:
     // Core components
-    std::unique_ptr<ONNXInference> inference_engine_;
+    std::unique_ptr<InferenceEngine> inference_engine_;
     std::unique_ptr<ImageProcessor> preprocessor_;
     std::unique_ptr<TrackingState> state_;
     std::unique_ptr<PerformanceMonitor> monitor_;
