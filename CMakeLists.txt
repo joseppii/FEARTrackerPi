@@ -37,6 +37,9 @@ endif()
 if(USE_NCNN)
     message(STATUS "Using NCNN backend with Vulkan GPU support")
 
+    # Allow override: -DNCNN_ROOT=/path/to/ncnn-install
+    set(NCNN_ROOT "$ENV{HOME}/opt/ncnn" CACHE PATH "NCNN install prefix")
+
     # Find NCNN
     find_package(ncnn QUIET)
     if(NOT ncnn_FOUND)
@@ -44,23 +47,23 @@ if(USE_NCNN)
         find_path(NCNN_INCLUDE_DIR
             NAMES ncnn/net.h
             PATHS
-                /usr/include
+                ${NCNN_ROOT}/include
                 /usr/local/include
-                /tmp/ncnn/build/install/include
+                /usr/include
         )
         find_library(NCNN_LIB
             NAMES ncnn
             PATHS
-                /usr/lib
+                ${NCNN_ROOT}/lib
                 /usr/local/lib
-                /tmp/ncnn/build/install/lib
+                /usr/lib
         )
         if(NCNN_INCLUDE_DIR AND NCNN_LIB)
             message(STATUS "NCNN found: ${NCNN_LIB}")
             set(NCNN_LIBRARIES ${NCNN_LIB})
             set(NCNN_INCLUDE_DIRS ${NCNN_INCLUDE_DIR})
         else()
-            message(FATAL_ERROR "NCNN not found. Build with: cd /tmp/ncnn/build && sudo make install")
+            message(FATAL_ERROR "NCNN not found. Set -DNCNN_ROOT=<install-prefix> or install to ${NCNN_ROOT}")
         endif()
     else()
         message(STATUS "NCNN found via CMake package")
@@ -140,14 +143,24 @@ add_library(feartracker_lib STATIC ${FEAR_TRACKER_SOURCES})
 if(USE_NCNN)
     find_package(OpenMP REQUIRED)
 
-    # glslang libraries (built with NCNN for Vulkan shader compilation)
-    set(GLSLANG_LIBS
-        /tmp/ncnn/build/install/lib/libglslang.a
-        /tmp/ncnn/build/install/lib/libMachineIndependent.a
-        /tmp/ncnn/build/install/lib/libGenericCodeGen.a
-        /tmp/ncnn/build/install/lib/libOSDependent.a
-        /tmp/ncnn/build/install/lib/libSPIRV.a
-    )
+    # glslang libraries (built alongside NCNN for Vulkan shader compilation).
+    # Derive from NCNN_LIB's directory; only include libs that actually exist
+    # (glslang layout differs across versions — newer builds bundle several
+    # archives into libglslang.a).
+    get_filename_component(NCNN_LIB_DIR "${NCNN_LIB}" DIRECTORY)
+    set(GLSLANG_LIBS "")
+    foreach(_lib
+            libglslang
+            libglslang-default-resource-limits
+            libMachineIndependent
+            libGenericCodeGen
+            libOSDependent
+            libSPIRV)
+        if(EXISTS "${NCNN_LIB_DIR}/${_lib}.a")
+            list(APPEND GLSLANG_LIBS "${NCNN_LIB_DIR}/${_lib}.a")
+        endif()
+    endforeach()
+    message(STATUS "glslang libs: ${GLSLANG_LIBS}")
 
     target_link_libraries(feartracker_lib
         ${OpenCV_LIBS}
