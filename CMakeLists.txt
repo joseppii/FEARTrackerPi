@@ -8,6 +8,10 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 option(USE_NCNN "Use NCNN backend (with Vulkan GPU support)" ON)
 option(USE_ONNX "Use ONNX Runtime backend" OFF)
 
+# Camera backend options
+option(USE_LIBCAMERA "Enable libcamera backend for CSI cameras" ON)
+option(USE_GSTREAMER "Enable GStreamer backend for CSI cameras" ON)
+
 # Optimize for Pi5 Cortex-A76
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=armv8.2-a+fp16+simd -mtune=cortex-a76")
 set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3 -DNDEBUG -ffast-math")
@@ -31,6 +35,28 @@ if(OpenCV_FOUND)
     message(STATUS "OpenCV libraries: ${OpenCV_LIBS}")
 else()
     message(FATAL_ERROR "OpenCV not found")
+endif()
+
+# libcamera (optional - for CSI camera support)
+if(USE_LIBCAMERA)
+    pkg_check_modules(LIBCAMERA libcamera)
+    if(LIBCAMERA_FOUND)
+        message(STATUS "libcamera found: ${LIBCAMERA_VERSION}")
+        add_definitions(-DHAVE_LIBCAMERA=1)
+    else()
+        message(STATUS "libcamera not found - libcamera backend disabled")
+    endif()
+endif()
+
+# GStreamer (optional - for CSI camera support via GStreamer)
+if(USE_GSTREAMER)
+    pkg_check_modules(GSTREAMER gstreamer-1.0 gstreamer-app-1.0)
+    if(GSTREAMER_FOUND)
+        message(STATUS "GStreamer found: ${GSTREAMER_VERSION}")
+        add_definitions(-DHAVE_GSTREAMER=1)
+    else()
+        message(STATUS "GStreamer not found - GStreamer backend disabled")
+    endif()
 endif()
 
 # Inference backend selection
@@ -116,6 +142,14 @@ elseif(USE_ONNX)
     include_directories(${ONNXRUNTIME_INCLUDE_DIR})
 endif()
 
+if(LIBCAMERA_FOUND)
+    include_directories(${LIBCAMERA_INCLUDE_DIRS})
+endif()
+
+if(GSTREAMER_FOUND)
+    include_directories(${GSTREAMER_INCLUDE_DIRS})
+endif()
+
 # Source files (common)
 set(FEAR_TRACKER_SOURCES
     src/fear_tracker.cpp
@@ -123,7 +157,16 @@ set(FEAR_TRACKER_SOURCES
     src/tracking_state.cpp
     src/performance_monitor.cpp
     src/utils.cpp
+    src/video_source.cpp
+    src/video_source_file.cpp
+    src/camera_gstreamer.cpp
+    src/rtp_h265_source.cpp
 )
+
+# Add libcamera source if available
+if(LIBCAMERA_FOUND)
+    list(APPEND FEAR_TRACKER_SOURCES src/camera_libcamera.cpp)
+endif()
 
 # Add backend-specific inference source
 if(USE_NCNN)
@@ -176,6 +219,15 @@ elseif(USE_ONNX)
         ${ONNXRUNTIME_LIB}
         pthread
     )
+endif()
+
+# Link camera backend libraries
+if(LIBCAMERA_FOUND)
+    target_link_libraries(feartracker_lib ${LIBCAMERA_LIBRARIES})
+endif()
+
+if(GSTREAMER_FOUND)
+    target_link_libraries(feartracker_lib ${GSTREAMER_LIBRARIES})
 endif()
 
 # Create main executable

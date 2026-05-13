@@ -1,11 +1,13 @@
 #include "fear_tracker.h"
 #include "utils.h"
+#include "video_source.h"
 #include "build_info.h"
 #include <iostream>
 #include <opencv2/opencv.hpp>
 #include <chrono>
 #include <thread>
 #include <csignal>
+#include <algorithm>
 
 // Global flag for graceful shutdown
 volatile bool g_shutdown = false;
@@ -21,6 +23,7 @@ struct AppConfig {
     std::string template_model = "models/fear_net_template.onnx";
     std::string search_model = "models/fear_net_search.onnx";
     cv::Rect initial_bbox;
+    bool select_bbox = false;     // override -b with interactive selection on first frame
     bool benchmark = false;
     bool display = false;
     bool save_frames = false;
@@ -28,6 +31,22 @@ struct AppConfig {
     int fps_limit = 0;  // 0 = no limit
     int threads = 4;
     std::string output_dir = "output";
+
+    // Camera options
+    bool use_camera = false;
+    std::string camera_backend = "auto";  // "libcamera", "gstreamer", "auto"
+    int camera_width = 1280;
+    int camera_height = 720;
+    int camera_fps = 30;
+    std::string camera_id = "0";
+    bool list_cameras = false;
+
+    // RTP H265 options
+    bool use_rtp = false;
+    int rtp_port = 5004;
+    int rtp_latency_ms = 50;
+    int rtp_payload_type = 96;
+    std::string rtp_pipeline;  // optional full pipeline override
 };
 
 bool parse_arguments(int argc, char* argv[], AppConfig& config) {
@@ -51,6 +70,8 @@ bool parse_arguments(int argc, char* argv[], AppConfig& config) {
                 std::cerr << "Invalid bbox format. Use: x,y,w,h" << std::endl;
                 return false;
             }
+        } else if (key == "select-bbox") {
+            config.select_bbox = true;
         } else if (key == "benchmark") {
             config.benchmark = true;
         } else if (key == "display") {
@@ -65,6 +86,30 @@ bool parse_arguments(int argc, char* argv[], AppConfig& config) {
             config.output_dir = value;
         } else if (key == "h" || key == "help") {
             config.help = true;
+        } else if (key == "camera") {
+            config.use_camera = true;
+        } else if (key == "camera-backend") {
+            config.camera_backend = value;
+        } else if (key == "camera-width") {
+            config.camera_width = std::stoi(value);
+        } else if (key == "camera-height") {
+            config.camera_height = std::stoi(value);
+        } else if (key == "camera-fps") {
+            config.camera_fps = std::stoi(value);
+        } else if (key == "camera-id") {
+            config.camera_id = value;
+        } else if (key == "list-cameras") {
+            config.list_cameras = true;
+        } else if (key == "rtp") {
+            config.use_rtp = true;
+        } else if (key == "rtp-port") {
+            config.rtp_port = std::stoi(value);
+        } else if (key == "rtp-latency") {
+            config.rtp_latency_ms = std::stoi(value);
+        } else if (key == "rtp-payload") {
+            config.rtp_payload_type = std::stoi(value);
+        } else if (key == "rtp-pipeline") {
+            config.rtp_pipeline = value;
         } else {
             std::cerr << "Unknown argument: " << key << std::endl;
             return false;
@@ -75,35 +120,67 @@ bool parse_arguments(int argc, char* argv[], AppConfig& config) {
 }
 
 bool validate_config(const AppConfig& config) {
-    if (config.help) {
-        return true;  // Help doesn't need validation
+    if (config.help || config.list_cameras) {
+        return true;  // Help and list-cameras don't need validation
     }
-    
-    if (config.input_video.empty()) {
-        std::cerr << "Input video is required" << std::endl;
+
+    // Exactly one input mode must be specified
+    const int input_modes = (config.use_camera ? 1 : 0)
+                          + (config.use_rtp ? 1 : 0)
+                          + (config.input_video.empty() ? 0 : 1);
+    if (input_modes == 0) {
+        std::cerr << "An input is required: -i <file>, --camera, or --rtp" << std::endl;
         return false;
     }
-    
-    if (!FEARUtils::file_exists(config.input_video)) {
+    if (input_modes > 1) {
+        std::cerr << "Specify only one of -i, --camera, --rtp" << std::endl;
+        return false;
+    }
+
+    // Validate file input
+    if (!config.use_camera && !config.use_rtp && !FEARUtils::file_exists(config.input_video)) {
         std::cerr << "Input video not found: " << config.input_video << std::endl;
         return false;
     }
-    
+
+    // Validate RTP options
+    if (config.use_rtp) {
+        if (config.rtp_port <= 0 || config.rtp_port > 65535) {
+            std::cerr << "Invalid --rtp-port: " << config.rtp_port << std::endl;
+            return false;
+        }
+        if (config.rtp_latency_ms < 0) {
+            std::cerr << "Invalid --rtp-latency: " << config.rtp_latency_ms << std::endl;
+            return false;
+        }
+    }
+
     if (!FEARUtils::file_exists(config.template_model)) {
         std::cerr << "Template model not found: " << config.template_model << std::endl;
         return false;
     }
-    
+
     if (!FEARUtils::file_exists(config.search_model)) {
         std::cerr << "Search model not found: " << config.search_model << std::endl;
         return false;
     }
-    
+
     if (config.initial_bbox.area() == 0) {
         std::cerr << "Initial bounding box is required" << std::endl;
         return false;
     }
-    
+
+    // Validate camera backend
+    if (config.use_camera) {
+        std::string backend = config.camera_backend;
+        std::transform(backend.begin(), backend.end(), backend.begin(), ::tolower);
+        if (backend != "auto" && backend != "libcamera" && backend != "gstreamer") {
+            std::cerr << "Invalid camera backend: " << config.camera_backend << std::endl;
+            std::cerr << "Valid options: auto, libcamera, gstreamer" << std::endl;
+            return false;
+        }
+    }
+
     return true;
 }
 
@@ -133,7 +210,21 @@ int main(int argc, char* argv[]) {
         FEARUtils::print_usage(argv[0]);
         return 0;
     }
-    
+
+    // Handle --list-cameras
+    if (config.list_cameras) {
+        std::cout << "Available cameras:" << std::endl;
+        auto cameras = list_available_cameras();
+        if (cameras.empty()) {
+            std::cout << "  (no cameras detected)" << std::endl;
+        } else {
+            for (size_t i = 0; i < cameras.size(); i++) {
+                std::cout << "  [" << i << "] " << cameras[i] << std::endl;
+            }
+        }
+        return 0;
+    }
+
     if (!validate_config(config)) {
         std::cerr << "Configuration validation failed" << std::endl;
         FEARUtils::print_usage(argv[0]);
@@ -142,43 +233,82 @@ int main(int argc, char* argv[]) {
     
     // Print startup information
     print_version_info();
-    std::cout << "Input: " << config.input_video << std::endl;
+    if (config.use_camera) {
+        std::cout << "Input: Camera (backend=" << config.camera_backend
+                  << ", " << config.camera_width << "x" << config.camera_height
+                  << " @ " << config.camera_fps << " FPS)" << std::endl;
+    } else if (config.use_rtp) {
+        std::cout << "Input: RTP H265 (udp:" << config.rtp_port
+                  << ", payload=" << config.rtp_payload_type
+                  << ", latency=" << config.rtp_latency_ms << "ms)" << std::endl;
+    } else {
+        std::cout << "Input: " << config.input_video << std::endl;
+    }
     std::cout << "Template model: " << config.template_model << std::endl;
     std::cout << "Search model: " << config.search_model << std::endl;
     std::cout << "Initial bbox: " << FEARUtils::bbox_to_string(config.initial_bbox) << std::endl;
-    
+
     try {
         // Initialize tracker
         std::cout << "Initializing FEAR tracker..." << std::endl;
         FEARTracker tracker;
-        
+
         if (!tracker.initialize(config.template_model, config.search_model)) {
             std::cerr << "Failed to initialize tracker" << std::endl;
             return 1;
         }
-        
+
         // Enable performance monitoring if requested
         if (config.benchmark) {
             tracker.enable_performance_monitoring(true);
             std::cout << "Performance monitoring enabled" << std::endl;
         }
-        
-        // Open input video
-        std::cout << "Opening video: " << config.input_video << std::endl;
-        cv::VideoCapture cap(config.input_video);
-        if (!cap.isOpened()) {
-            std::cerr << "Failed to open video: " << config.input_video << std::endl;
+
+        // Create video source (file, camera, or RTP)
+        std::unique_ptr<IVideoSource> source;
+        if (config.use_camera) {
+            VideoSourceConfig cam_config;
+            cam_config.width = config.camera_width;
+            cam_config.height = config.camera_height;
+            cam_config.framerate = config.camera_fps;
+            cam_config.camera_id = config.camera_id;
+
+            std::cout << "Opening camera..." << std::endl;
+            source = create_video_source("", true, config.camera_backend, cam_config);
+        } else if (config.use_rtp) {
+            RtpH265Config rtp_config;
+            rtp_config.port = config.rtp_port;
+            rtp_config.latency_ms = config.rtp_latency_ms;
+            rtp_config.payload_type = config.rtp_payload_type;
+            rtp_config.custom_pipeline = config.rtp_pipeline;
+
+            std::cout << "Opening RTP H265 stream..." << std::endl;
+            source = create_rtp_video_source(rtp_config);
+        } else {
+            std::cout << "Opening video: " << config.input_video << std::endl;
+            source = create_video_source(config.input_video, false, "", VideoSourceConfig());
+        }
+
+        if (!source || !source->is_open()) {
+            std::cerr << "Failed to open video source" << std::endl;
             return 1;
         }
-        
+
         // Get video properties
-        int frame_width = static_cast<int>(cap.get(cv::CAP_PROP_FRAME_WIDTH));
-        int frame_height = static_cast<int>(cap.get(cv::CAP_PROP_FRAME_HEIGHT));
-        double fps = cap.get(cv::CAP_PROP_FPS);
-        int total_frames = static_cast<int>(cap.get(cv::CAP_PROP_FRAME_COUNT));
-        
-        std::cout << "Video info: " << frame_width << "x" << frame_height 
-                  << " @ " << fps << " FPS, " << total_frames << " frames" << std::endl;
+        int frame_width = source->width();
+        int frame_height = source->height();
+        double fps = source->fps();
+        int64_t total_frames = source->frame_count();  // -1 for cameras
+        bool is_live = source->is_live();
+
+        if (is_live) {
+            std::cout << "Source info: " << source->description() << " - "
+                      << frame_width << "x" << frame_height
+                      << " @ " << fps << " FPS (live)" << std::endl;
+        } else {
+            std::cout << "Source info: " << frame_width << "x" << frame_height
+                      << " @ " << fps << " FPS, " << total_frames << " frames" << std::endl;
+        }
         
         // Setup output video writer if needed
         cv::VideoWriter writer;
@@ -203,11 +333,30 @@ int main(int argc, char* argv[]) {
         
         // Read first frame and initialize tracking
         cv::Mat frame;
-        if (!cap.read(frame) || frame.empty()) {
+        if (!source->read(frame) || frame.empty()) {
             std::cerr << "Failed to read first frame" << std::endl;
             return 1;
         }
-        
+
+        // Interactive bbox selection (overrides -b when set). Requires a display
+        // surface: in a headless SSH session without X forwarding this will fail.
+        if (config.select_bbox) {
+            std::cout << "Drag a bounding box on the first frame.\n"
+                         "  ENTER or SPACE to confirm, c to cancel.\n";
+            const std::string roi_window = "FEARTracker Pi";
+            cv::Rect selected = cv::selectROI(roi_window, frame,
+                                              /*showCrosshair=*/false,
+                                              /*fromCenter=*/false);
+            if (selected.width == 0 || selected.height == 0) {
+                std::cerr << "Bbox selection cancelled — exiting." << std::endl;
+                cv::destroyAllWindows();
+                return 1;
+            }
+            config.initial_bbox = selected;
+            std::cout << "Selected bbox: "
+                      << FEARUtils::bbox_to_string(config.initial_bbox) << std::endl;
+        }
+
         // Validate initial bbox
         cv::Rect clamped_bbox = FEARUtils::clamp_bbox(config.initial_bbox, frame.size());
         if (clamped_bbox != config.initial_bbox) {
@@ -236,7 +385,7 @@ int main(int argc, char* argv[]) {
             auto frame_start = std::chrono::steady_clock::now();
             
             // Read next frame
-            if (!cap.read(frame) || frame.empty()) {
+            if (!source->read(frame) || frame.empty()) {
                 break;
             }
             
@@ -278,20 +427,26 @@ int main(int argc, char* argv[]) {
             
             // Progress reporting
             if (frame_number % 50 == 0) {
-                double progress = static_cast<double>(frame_number) / total_frames * 100.0;
-                std::cout << "Progress: " << std::fixed << std::setprecision(1) 
-                         << progress << "% (Frame " << frame_number << "/" << total_frames << ")";
-                
+                if (is_live) {
+                    // Live camera - no progress percentage
+                    std::cout << "Frame " << frame_number;
+                } else {
+                    // Video file - show progress percentage
+                    double progress = static_cast<double>(frame_number) / total_frames * 100.0;
+                    std::cout << "Progress: " << std::fixed << std::setprecision(1)
+                             << progress << "% (Frame " << frame_number << "/" << total_frames << ")";
+                }
+
                 if (config.benchmark) {
                     // Get current performance stats
                     auto elapsed = std::chrono::steady_clock::now() - loop_start;
                     double elapsed_sec = std::chrono::duration<double>(elapsed).count();
                     double current_fps = frame_number / elapsed_sec;
-                    
+
                     std::cout << " - FPS: " << std::fixed << std::setprecision(2) << current_fps;
                     std::cout << " - Conf: " << std::fixed << std::setprecision(3) << result.confidence;
                 }
-                
+
                 std::cout << std::endl;
             }
             
@@ -307,7 +462,7 @@ int main(int argc, char* argv[]) {
         }
         
         // Cleanup
-        cap.release();
+        source->close();
         if (writer.isOpened()) {
             writer.release();
         }
