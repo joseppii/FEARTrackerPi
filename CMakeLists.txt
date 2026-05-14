@@ -160,6 +160,7 @@ set(FEAR_TRACKER_SOURCES
     src/video_source.cpp
     src/video_source_file.cpp
     src/camera_gstreamer.cpp
+    src/camera_v4l2.cpp
     src/rtp_h265_source.cpp
 )
 

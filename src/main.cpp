@@ -174,9 +174,9 @@ bool validate_config(const AppConfig& config) {
     if (config.use_camera) {
         std::string backend = config.camera_backend;
         std::transform(backend.begin(), backend.end(), backend.begin(), ::tolower);
-        if (backend != "auto" && backend != "libcamera" && backend != "gstreamer") {
+        if (backend != "auto" && backend != "libcamera" && backend != "gstreamer" && backend != "v4l2") {
             std::cerr << "Invalid camera backend: " << config.camera_backend << std::endl;
-            std::cerr << "Valid options: auto, libcamera, gstreamer" << std::endl;
+            std::cerr << "Valid options: auto, libcamera, gstreamer, v4l2" << std::endl;
             return false;
         }
     }

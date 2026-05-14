@@ -304,11 +304,11 @@ void print_usage(const std::string& program_name) {
     std::cout << "  --rtp-payload N          RTP dynamic payload type (default: 96)\n";
     std::cout << "  --rtp-pipeline STR       Full GStreamer pipeline override\n";
     std::cout << "\nCamera Options:\n";
-    std::cout << "  --camera-backend BACKEND Camera backend: auto, libcamera, gstreamer (default: auto)\n";
+    std::cout << "  --camera-backend BACKEND Camera backend: auto, libcamera, gstreamer, v4l2 (default: auto)\n";
     std::cout << "  --camera-width W         Camera capture width (default: 1280)\n";
     std::cout << "  --camera-height H        Camera capture height (default: 720)\n";
     std::cout << "  --camera-fps F           Camera target framerate (default: 30)\n";
-    std::cout << "  --camera-id ID           Camera index or name (default: 0)\n";
+    std::cout << "  --camera-id ID           Camera index, name, or /dev/videoN path (default: 0)\n";
     std::cout << "  --list-cameras           List available cameras and exit\n";
     std::cout << "\nTracking Options:\n";
     std::cout << "  -b, --bbox X,Y,W,H       Initial bounding box (required)\n";
@@ -332,6 +332,8 @@ void print_usage(const std::string& program_name) {
     std::cout << "  " << program_name << " --camera -b 100,50,80,120 --display\n\n";
     std::cout << "  # Track with camera, save output video\n";
     std::cout << "  " << program_name << " --camera --camera-backend libcamera -o output.mp4 -b 100,50,80,120\n\n";
+    std::cout << "  # Track with a USB UVC camera at /dev/video0\n";
+    std::cout << "  " << program_name << " --camera --camera-backend v4l2 --camera-id /dev/video0 -b 100,50,80,120 --display\n\n";
     std::cout << "  # List available cameras\n";
     std::cout << "  " << program_name << " --list-cameras\n\n";
     std::cout << "  # Track an incoming H265-over-RTP stream on UDP port 5004\n";

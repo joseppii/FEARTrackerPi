@@ -115,6 +115,38 @@ private:
     std::string custom_pipeline_;
 };
 
+// V4L2 source for USB UVC cameras. Uses cv::VideoCapture with the
+// CAP_V4L2 backend, so it handles both YUYV and MJPEG cameras (OpenCV
+// transcodes MJPEG → BGR internally).
+class V4L2Source : public IVideoSource {
+public:
+    explicit V4L2Source(const VideoSourceConfig& config);
+    ~V4L2Source() override;
+
+    V4L2Source(const V4L2Source&) = delete;
+    V4L2Source& operator=(const V4L2Source&) = delete;
+
+    bool open() override;
+    bool is_open() const override;
+    void close() override;
+    bool read(cv::Mat& frame) override;
+
+    int width() const override;
+    int height() const override;
+    double fps() const override;
+    int64_t frame_count() const override { return -1; }
+    bool is_live() const override { return true; }
+    std::string description() const override;
+
+    // True iff at least one /dev/video* device exists.
+    static bool is_available();
+
+private:
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+    VideoSourceConfig config_;
+};
+
 #ifdef HAVE_LIBCAMERA
 // Native libcamera source for best performance
 class LibcameraSource : public IVideoSource {

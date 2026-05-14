@@ -22,6 +22,18 @@ std::unique_ptr<IVideoSource> create_video_source(
     std::transform(backend_lower.begin(), backend_lower.end(),
                    backend_lower.begin(), ::tolower);
 
+    if (backend_lower == "v4l2") {
+        if (!V4L2Source::is_available()) {
+            std::cerr << "V4L2 backend requested but no /dev/video* devices found" << std::endl;
+            return nullptr;
+        }
+        auto source = std::make_unique<V4L2Source>(config);
+        if (!source->open()) {
+            return nullptr;
+        }
+        return source;
+    }
+
     if (backend_lower == "gstreamer") {
         // Force GStreamer
         if (!GStreamerSource::is_available()) {
